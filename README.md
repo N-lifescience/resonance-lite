@@ -34,7 +34,7 @@ const html = renderLesson('# 제목\n본문');
 
     https://cdn.jsdelivr.net/gh/N-lifescience/resonance-lite@1/lite.js
 
-lite.js를 고치면 `1.x.y` 태그를 올리고 `https://purge.jsdelivr.net/gh/N-lifescience/resonance-lite@1/lite.js`로 캐시를 비운다. 규칙과 에이전트는 건드리지 않아도 된다. 문법이 바뀌어 규칙도 바꿔야 할 때만 `2.0.0`으로 올리고 규칙 주소를 `@2`로 바꾼다.
+lite.js를 고치면 `1.x.y` 태그를 올리고 `https://purge.jsdelivr.net/gh/N-lifescience/resonance-lite@1/lite.js`로 캐시를 비운다. 규칙과 에이전트는 건드리지 않아도 된다. 다만 `@1` 주소는 브라우저가 최대 7일(`max-age=604800`) 동안 캐시에 두므로, 이미 열어 본 컴퓨터는 새 판을 늦게 받을 수 있다(처음 여는 컴퓨터는 바로 받는다). 문법이 바뀌어 규칙도 바꿔야 할 때만 `2.0.0`으로 올리고 규칙 주소를 `@2`로 바꾼다.
 
 마주온의 기본 모델은 HTML을 짜지 않고 수업 글만 쓴다. 코드 실행 칸은 인터넷에 닿지 않고(2026-11-16 확인, Pillow는 있음) 만든 파일은 7일짜리 링크로 나온다. 그래서 규칙의 코드 두 개가 이렇게 나눠 일한다.
 

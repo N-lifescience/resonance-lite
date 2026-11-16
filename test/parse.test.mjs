@@ -501,7 +501,7 @@ await asyncTest('engine audit copy for AI carries the lesson source instead of a
   await h.win.navigator.clipboard.writeText('이 수업 HTML을 Exploragram 엔진의 자동 점검으로 열어 보니 고칠 곳이 있어요. 아래를 고친 파일 전체를 다시 주세요.\n\n[꼭 고칠 것]\n- 3쪽: 글이 넘쳐요\n\n[지킬 것]\n- <head>의 엔진 css·js 두 줄과 장마다 붙인 id는 그대로 두세요.');
   await h.win.navigator.clipboard.writeText('다른 글');
   assert.equal(copied.length, 2);
-  assert(copied[0].startsWith('공명 라이트 수업 파일을 고쳐 주세요.'));
+  assert(copied[0].startsWith('공명 라이트 수업 파일을 고쳐 주세요. 먼저 1번 PPT 목록 코드를 다시 돌려 그림을 담고'));
   assert(copied[0].includes('[꼭 고칠 것]\n- 3쪽: 글이 넘쳐요'));
   assert(!copied[0].includes('[지킬 것]') && !copied[0].includes('파일 전체를 다시'));
   assert(copied[0].endsWith('[지금 수업 글]\n```text\n# [표지] 확산\n# 장\n문단\n```'));

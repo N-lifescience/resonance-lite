@@ -29,8 +29,7 @@
     t=r'''
     (수업 글)
     '''
-    try:g=json.dumps(F)
-    except:g='{}'
+    g=json.dumps(F)
     open('수업.html','w',encoding='utf-8').write(f'<!doctype html><meta charset="utf-8"><script src="LITE_URL"></script><script type="text/x-figures">{g}</script><script type="text/x-lesson">\n{t.strip()}\n</script>')
 
 # 수업 글 문법

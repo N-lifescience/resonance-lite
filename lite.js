@@ -839,7 +839,8 @@
   }
   // 마주온 실행 칸은 차례마다 새로 시작하고, 모델은 앞 차례 코드에 넣은 수업 글을 기억하지 못한다(2026-11-16 확인).
   // 그래서 AI에게 고쳐 달라고 보낼 글에 지금 수업 글을 함께 담는다.
-  var FIX_HEAD = '공명 라이트 수업 파일을 고쳐 주세요. 아래 [지금 수업 글]에서 고칠 곳만 고치고, PPT 목록 코드와 파일 만들기 코드를 다시 돌려 새 링크를 주세요.';
+  // 실행 칸이 새로 시작하므로 그림 묶음(F)도 없다. 1번 PPT 목록 코드부터 다시 돌려야 그림이 빠지지 않는다.
+  var FIX_HEAD = '공명 라이트 수업 파일을 고쳐 주세요. 먼저 1번 PPT 목록 코드를 다시 돌려 그림을 담고, 아래 [지금 수업 글]에서 고칠 곳만 고쳐 파일 만들기 코드를 돌린 뒤 새 링크를 주세요.';
   var ENGINE_AUDIT_HEAD = /^이 수업 HTML을 Exploragram 엔진의 자동 점검으로[^\n]*\n/;
   function lessonSource(doc) {
     var s = doc.querySelector('script[type="text/x-lesson"], script[type="text/plain"]#lesson');
