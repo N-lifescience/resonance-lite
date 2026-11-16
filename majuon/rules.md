@@ -2,7 +2,7 @@
 
 # 순서(질문하지 말고 한 답 안에서 끝낸다)
 1. PPT의 장마다 제목, 본문, 빈칸 정답, 표, 그림을 읽는다. PPT 파일이 올라오면 코드 실행으로 아래 코드를 그대로 돌린다('올라온파일.pptx'만 실제 경로로 바꾼다). 장마다 글과 그림 번호가 나온다. [그림 n-k]는 이 목록의 번호를 그대로 쓴다. 숫자 하나만 쓰지 않는다.
-    import zipfile,re,collections,io,base64,json
+    import zipfile,re,collections,io,base64
     from PIL import Image
     z=zipfile.ZipFile('올라온파일.pptx')
     R=lambda p:{re.search(r'Id="([^"]+)"',r)[1]:re.search(r'Target="([^"]+)"',r)[1] for r in re.findall(r'<Relationship [^>]*>',z.read(p).decode())}
@@ -20,16 +20,16 @@
                 print(f'[그림 {n}-{k}]',d[-1] if d else '')
                 try:i=Image.open(z.open(p));i.thumbnail((1280,1280));o=io.BytesIO();i.save(o,'WEBP');F[f'{n}-{k}']=base64.b64encode(o.getvalue()).decode()
                 except:pass
-    json.dump(F,open('/tmp/figs.json','w'))
 2. '모형 계획'을 쓴다: 아래 '움직이는 모형' 대응표에서 PPT에 있는 내용을 2~3개 찾아 '개념 → 틀' 목록으로. 과정은 [단계], 조건 비교는 [고르기]가 거의 늘 맞는다. 계획에 적은 틀은 수업 글에 [틀] 덩어리로 반드시 넣는다.
-3. 수업 글 전체를 ```text 코드 블록으로 답에 쓰고, 같은 글을 아래 '파일 만들기' 코드의 (수업 글) 자리에 넣어 코드 실행으로 돌린다. 나머지 코드는 그대로 둔다. 고쳐 달라는 말이 오면 1번 코드를 다시 돌리고, 앞 답의 수업 글에서 그 부분만 고쳐 같은 순서로 한다.
+3. 코드 실행으로 아래 '파일 만들기' 코드를 돌린다. (수업 글) 자리에 수업 글 전체를 넣고 나머지는 그대로 둔다. 수업 글은 답에 따로 쓰지 않는다. 고쳐 달라는 말에 [지금 수업 글]이 있으면 1번 코드를 다시 돌리고 그 글에서 고칠 곳만 고쳐 돌린다. 없으면 「설정」 → 「AI에게 보낼 말 복사」로 붙여 달라고만 한다.
 4. 답에는 만든 파일의 링크를 주고 '링크 뒤에 쓸 것'을 쓴다.
 
 # 파일 만들기
+    import json
     t=r'''
     (수업 글)
     '''
-    try:g=open('/tmp/figs.json').read()
+    try:g=json.dumps(F)
     except:g='{}'
     open('수업.html','w',encoding='utf-8').write(f'<!doctype html><meta charset="utf-8"><script src="LITE_URL"></script><script type="text/x-figures">{g}</script><script type="text/x-lesson">\n{t.strip()}\n</script>')
 
@@ -119,6 +119,6 @@ Q. 리튬 이온은 어떻게 만들어질까?
 # 링크 뒤에 쓸 것
 1. 링크를 누르면 바로 열린다. ← → 키로 넘긴다.
 2. 링크는 7일 뒤 사라지니 오늘 「설정」 → 「그림 넣어 저장」으로 저장한다.
-3. 「점검」이 뜨면 「AI에게 보낼 말 복사」를 눌러 여기에 붙여 넣는다.
+3. 고칠 곳은 「점검」이나 「설정」의 「AI에게 보낼 말 복사」를 눌러 여기에 붙여 넣는다.
 4. 확인할 것: 모형 수치, 짐작한 그림 번호, 바로잡은 곳.
 5. "교과서 그림이 들어 있으니 수업용으로만 쓰고 인터넷에 공개하지 마세요."

@@ -837,6 +837,69 @@
     shadow.querySelector('button').addEventListener('click', function (e) { e.stopPropagation(); if (box.parentNode) box.parentNode.removeChild(box); });
     doc.body.appendChild(box);
   }
+  // 마주온 실행 칸은 차례마다 새로 시작하고, 모델은 앞 차례 코드에 넣은 수업 글을 기억하지 못한다(2026-11-16 확인).
+  // 그래서 AI에게 고쳐 달라고 보낼 글에 지금 수업 글을 함께 담는다.
+  var FIX_HEAD = '공명 라이트 수업 파일을 고쳐 주세요. 아래 [지금 수업 글]에서 고칠 곳만 고치고, PPT 목록 코드와 파일 만들기 코드를 다시 돌려 새 링크를 주세요.';
+  var ENGINE_AUDIT_HEAD = /^이 수업 HTML을 Exploragram 엔진의 자동 점검으로[^\n]*\n/;
+  function lessonSource(doc) {
+    var s = doc.querySelector('script[type="text/x-lesson"], script[type="text/plain"]#lesson');
+    return s ? String(s.textContent || '').trim() : '';
+  }
+  function fixMessage(doc, items) {
+    var text = lessonSource(doc);
+    return FIX_HEAD + '\n\n' + (items || '[고칠 곳]\n- (여기에 고칠 곳을 쓰세요)') + (text ? '\n\n[지금 수업 글]\n```text\n' + text + '\n```' : '');
+  }
+  // 엔진 「점검」의 「AI에게 보낼 말」은 HTML 전체를 다시 달라는 말이다. 점검 항목만 살리고 수업 글을 붙인다.
+  function liteAuditText(doc, text) {
+    if (!ENGINE_AUDIT_HEAD.test(text) || !lessonSource(doc)) return text;
+    return fixMessage(doc, text.replace(ENGINE_AUDIT_HEAD, '').split('\n[지킬 것]')[0].trim());
+  }
+  function copyText(doc, text) {
+    var nav = root.navigator;
+    if (nav && nav.clipboard && nav.clipboard.writeText) return nav.clipboard.writeText(text).then(function () { return true; }, function () { return copyByBox(doc, text); });
+    return Promise.resolve(copyByBox(doc, text));
+  }
+  function copyByBox(doc, text) {
+    var box = doc.createElement('textarea'); box.value = text; box.setAttribute('readonly', '');
+    box.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0';
+    doc.body.appendChild(box); box.select();
+    var ok = false; try { ok = doc.execCommand('copy'); } catch (err) { ok = false; }
+    doc.body.removeChild(box);
+    return ok;
+  }
+  function hookFixCopy(doc) {
+    if (doc.__liteFixCopy || !lessonSource(doc)) return;
+    doc.__liteFixCopy = true;
+    var nav = root.navigator;
+    if (nav && nav.clipboard && nav.clipboard.writeText) {
+      var write = nav.clipboard.writeText.bind(nav.clipboard);
+      try { nav.clipboard.writeText = function (text) { return write(liteAuditText(doc, String(text))); }; } catch (err) { log('복사 글을 바꿔 끼우지 못했다: ' + err.message); }
+    }
+    // 클립보드 권한이 없을 때 엔진은 숨은 글 상자(.ch-audit-copybox)를 골라 복사한다. 그때도 바꿔 끼운다.
+    doc.addEventListener('copy', function (e) {
+      var box = doc.activeElement;
+      if (!box || !box.classList || !box.classList.contains('ch-audit-copybox') || !e.clipboardData) return;
+      e.clipboardData.setData('text/plain', liteAuditText(doc, box.value));
+      e.preventDefault();
+    }, true);
+    // ⚙ 설정의 「파일」 칸에 「AI에게 보낼 말 복사」를 더한다. 점검에 걸리지 않은 것도 고쳐 달라고 할 수 있게.
+    if (!root.MutationObserver) return;
+    new root.MutationObserver(function () {
+      var panel = doc.querySelector('.ch-set-file');
+      if (!panel || panel.querySelector('.lite-fix-copy')) return;
+      var button = doc.createElement('button');
+      button.type = 'button'; button.className = 'ch-menu-item lite-fix-copy'; button.textContent = 'AI에게 보낼 말 복사';
+      button.addEventListener('click', function () {
+        copyText(doc, fixMessage(doc)).then(function (ok) {
+          button.textContent = ok ? '복사했어요. 마주온 대화에 붙여 넣고 고칠 곳을 쓰세요.' : '복사하지 못했어요.';
+          root.setTimeout(function () { button.textContent = 'AI에게 보낼 말 복사'; }, 4000);
+        });
+      });
+      var items = panel.querySelectorAll('.ch-menu-item');
+      var after = items.length ? items[items.length - 1] : null;
+      panel.insertBefore(button, after ? after.nextSibling : null);
+    }).observe(doc.body, { childList: true, subtree: true });
+  }
   function fillFigures(node, figs) {
     Array.prototype.forEach.call(node.querySelectorAll('img[data-ppt]'), function (img) {
       var f = figs[img.getAttribute('data-ppt')];
@@ -883,7 +946,7 @@
     doc.__resonanceLiteStarted = true;
     var base = script && script.getAttribute('data-engine') || DEFAULT_ENGINE;
     if (base.charAt(base.length - 1) !== '/') base += '/';
-    if (doc.body.querySelector('section.slide')) { loadEngine(doc, base); return; }
+    if (doc.body.querySelector('section.slide')) { hookFixCopy(doc); loadEngine(doc, base); return; }
     var source = doc.querySelector('script[type="text/x-lesson"], script[type="text/plain"]#lesson');
     if (!source) { log('수업 글 script를 찾지 못했다.'); return; }
     var lesson = parseLesson(source.textContent);
@@ -898,6 +961,7 @@
     lesson.warnings.forEach(function (w) { log(w.line + '행: ' + w.message); });
     var figs = {}, figMap = readFigures(doc);
     linkNotice(doc);
+    hookFixCopy(doc);
     loadCSS(doc, base).then(function () {
       return Promise.all([waitFonts(doc, source.textContent), loadFigures(figMap).then(function (loaded) { figs = loaded; })]);
     }).then(function () {

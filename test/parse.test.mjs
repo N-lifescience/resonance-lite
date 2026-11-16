@@ -418,6 +418,7 @@ function browserHarness(options = {}) {
   trace.length = 0;
   const win = { console: { warn: msg => warnings.push(msg) }, setTimeout: (fn, ms) => { assert.equal(ms, 5000); timers.set(++timerId, fn); return timerId; }, clearTimeout: id => timers.delete(id) };
   // 그림 묶음 시험용: 마주온 코드가 넣은 data URL을 400×300 그림으로 연다. 'bad'가 든 주소는 실패한다.
+  if (options.clipboard) win.navigator = { clipboard: { writeText: async text => { options.clipboard.push(text); } } };
   win.Image = class { set src(v) { this.naturalWidth = 400; this.naturalHeight = 300; Promise.resolve().then(() => (/bad/.test(v) ? this.onerror() : this.onload())); } };
   vm.runInNewContext(readFileSync(new URL('../lite.js', import.meta.url), 'utf8'), { window: win, document: doc });
   return { doc, win, source, trace, warnings, timers, ready: () => doc.events.DOMContentLoaded(), finishCSS: () => doc.querySelector('link[rel="stylesheet"]').events.load() };
@@ -492,6 +493,19 @@ await asyncTest('figure bundle from majuon fills picture slots and leaves the do
   await flush();
   assert.equal(old.doc.querySelectorAll('img[data-ppt]')[0].getAttribute('src'), png);
   assert(!old.doc.getElementById('lite-figures'));
+});
+await asyncTest('engine audit copy for AI carries the lesson source instead of asking for the whole HTML', async () => {
+  const copied = [];
+  const h = browserHarness({ ready: true, css: true, clipboard: copied, text: '# [표지] 확산\n# 장\n문단' });
+  await flush();
+  await h.win.navigator.clipboard.writeText('이 수업 HTML을 Exploragram 엔진의 자동 점검으로 열어 보니 고칠 곳이 있어요. 아래를 고친 파일 전체를 다시 주세요.\n\n[꼭 고칠 것]\n- 3쪽: 글이 넘쳐요\n\n[지킬 것]\n- <head>의 엔진 css·js 두 줄과 장마다 붙인 id는 그대로 두세요.');
+  await h.win.navigator.clipboard.writeText('다른 글');
+  assert.equal(copied.length, 2);
+  assert(copied[0].startsWith('공명 라이트 수업 파일을 고쳐 주세요.'));
+  assert(copied[0].includes('[꼭 고칠 것]\n- 3쪽: 글이 넘쳐요'));
+  assert(!copied[0].includes('[지킬 것]') && !copied[0].includes('파일 전체를 다시'));
+  assert(copied[0].endsWith('[지금 수업 글]\n```text\n# [표지] 확산\n# 장\n문단\n```'));
+  assert.equal(copied[1], '다른 글', 'other copies pass through unchanged');
 });
 await asyncTest('ready document and loaded stylesheet skip waits; explicit deck wins', async () => {
   const h = browserHarness({ ready: true, css: true, engine: true, base: '/engine', text: '덱: explicit-deck\n# 장\n문단' }); await flush();
