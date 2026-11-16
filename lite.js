@@ -788,11 +788,69 @@
     var load = Promise.all(['400', '700'].map(function (w) { return doc.fonts.load(w + ' 30px "Pretendard Variable"', sample); })).then(function () { return doc.fonts.ready; });
     return Promise.race([load, new Promise(function (r) { root.setTimeout(r, 3000); })]).catch(function () {});
   }
-  function measureSlides(doc, lesson) {
+  // 마주온 코드 실행이 원본 PPT에서 꺼낸 그림을 <script type="text/x-figures">{"7-4":"(WebP base64)"}</script>로 넣는다.
+  // 값은 data URL이어도 된다. 읽은 뒤 문서에서 떼어 내서, 엔진의 「그림 넣어 저장」이 그림을 두 번 담지 않게 한다.
+  function readFigures(doc) {
+    var el = doc.querySelector('script[type="text/x-figures"]') || doc.getElementById('lite-figures'), map = {};
+    if (!el) return map;
+    try { map = JSON.parse(el.textContent || '{}') || {}; } catch (err) { log('그림 묶음을 읽지 못했다: ' + err.message); }
+    if (el.parentNode) el.parentNode.removeChild(el);
+    return map;
+  }
+  function figureSrc(value) {
+    var s = String(value || '');
+    if (/^data:image\/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/=]+$/.test(s)) return s;
+    return /^[A-Za-z0-9+/]+={0,2}$/.test(s) ? 'data:image/webp;base64,' + s : '';
+  }
+  // 그림 크기를 먼저 알아 두어야 장 나누기가 실제 그림 높이로 잰다.
+  function loadFigures(map) {
+    var keys = Object.keys(map).filter(function (k) { return /^\d+-\d+$/.test(k) && figureSrc(map[k]); });
+    return Promise.all(keys.map(function (k) {
+      return new Promise(function (resolve) {
+        var im = new root.Image(), src = figureSrc(map[k]);
+        im.onload = function () { resolve([k, { src: src, w: im.naturalWidth, h: im.naturalHeight }]); };
+        im.onerror = function () { log('그림 ' + k + '을 열지 못했다.'); resolve(null); };
+        im.src = src;
+      });
+    })).then(function (list) {
+      var out = {};
+      list.forEach(function (pair) { if (pair && pair[1].w && pair[1].h) out[pair[0]] = pair[1]; });
+      return out;
+    });
+  }
+  // 마주온이 준 파일 링크(Azure 임시 저장소)는 7일 뒤 사라진다. 그 주소로 열었을 때만 저장하라는 띠를 띄운다.
+  // 닫힌 그림자 루트 안에 그려서, 엔진이 문서를 저장할 때 띠의 글과 모양이 파일에 따라가지 않게 한다.
+  function linkNotice(doc) {
+    var loc = root.location || {};
+    if (!/\.blob\.core\.windows\.net$/i.test(loc.hostname || '') || !doc.body) return;
+    var box = doc.createElement('lite-note');
+    if (!box.attachShadow) return;
+    var when = '7일 뒤에', se = /[?&]se=([^&]+)/.exec(loc.search || ''), end = se && new Date(decodeURIComponent(se[1]));
+    if (end && !isNaN(end)) when = (end.getMonth() + 1) + '월 ' + end.getDate() + '일에';
+    var shadow = box.attachShadow({ mode: 'closed' });
+    shadow.innerHTML = '<style>' +
+      'div{position:fixed;z-index:2147483000;top:12px;left:50%;transform:translateX(-50%);box-sizing:border-box;width:max-content;max-width:calc(100% - 32px);' +
+      'display:flex;gap:16px;align-items:center;padding:10px 12px 10px 20px;border-radius:14px;background:#1f2937;color:#fff;' +
+      'font:600 20px/1.45 "Pretendard Variable",Pretendard,"Malgun Gothic",sans-serif;word-break:keep-all;overflow-wrap:anywhere;box-shadow:0 8px 24px rgba(0,0,0,.25)}' +
+      'button{flex:none;min-width:64px;min-height:44px;border:0;border-radius:10px;background:#fff;color:#1f2937;font:inherit;cursor:pointer}' +
+      '</style><div role="status"><span>이 링크는 ' + when + ' 사라져요. 아래 「설정」에서 「그림 넣어 저장」을 눌러 내 컴퓨터에 저장해 두세요.</span><button type="button">닫기</button></div>';
+    shadow.querySelector('button').addEventListener('click', function (e) { e.stopPropagation(); if (box.parentNode) box.parentNode.removeChild(box); });
+    doc.body.appendChild(box);
+  }
+  function fillFigures(node, figs) {
+    Array.prototype.forEach.call(node.querySelectorAll('img[data-ppt]'), function (img) {
+      var f = figs[img.getAttribute('data-ppt')];
+      if (!f || img.getAttribute('src')) return;
+      img.setAttribute('src', f.src);
+      img.style.aspectRatio = f.w + ' / ' + f.h;   // 그림을 다 풀기 전에도 같은 높이로 잰다
+    });
+  }
+  function measureSlides(doc, lesson, figs) {
     var host = doc.createElement('div'); host.className = 'lite-measure'; host.setAttribute('aria-hidden', 'true'); doc.body.appendChild(host);
     try {
       return paginateLesson(lesson, function (candidate) {
         host.innerHTML = renderSlide(candidate);
+        fillFigures(host, figs || {});
         // The engine will replace empty images with these placeholders later.
         // Include their real CSS and caption height while measuring, rather
         // than measuring a broken img with zero intrinsic height.
@@ -830,22 +888,29 @@
     if (!source) { log('수업 글 script를 찾지 못했다.'); return; }
     var lesson = parseLesson(source.textContent);
     doc.documentElement.lang = 'ko';
+    // 마주온 파일 만들기 코드는 <title>을 쓰지 않는다. 표지 제목을 문서 제목으로 삼아야 수업마다 판서 저장 칸(덱)이 갈린다.
+    var cover = lesson.slides.filter(function (s) { return s.type === 'cover' && s.title; })[0];
+    if (!String(doc.title || '').trim() && cover) doc.title = cover.title;
     doc.documentElement.setAttribute('data-deck', lesson.settings.deck || deckKey(doc.title || '수업'));
     doc.body.setAttribute('data-theme', 'ppt');
     if (lesson.settings.accent) { doc.body.style.setProperty('--accent', lesson.settings.accent); doc.body.style.setProperty('--tab', lesson.settings.accent); doc.body.style.setProperty('--tab-ink', '#fff'); }
     if (!doc.querySelector('meta[name="viewport"]')) { var meta = doc.createElement('meta'); meta.name = 'viewport'; meta.content = 'width=device-width, initial-scale=1'; doc.head.appendChild(meta); }
     lesson.warnings.forEach(function (w) { log(w.line + '행: ' + w.message); });
-    loadCSS(doc, base).then(function () { return waitFonts(doc, source.textContent); }).then(function () {
+    var figs = {}, figMap = readFigures(doc);
+    linkNotice(doc);
+    loadCSS(doc, base).then(function () {
+      return Promise.all([waitFonts(doc, source.textContent), loadFigures(figMap).then(function (loaded) { figs = loaded; })]);
+    }).then(function () {
       var marker = doc.createElement('div');
       doc.body.appendChild(marker);
       // Expand first, measure offscreen, then replace only these new slides.
       var slides = [];
       function insert(list) {
-        list.forEach(function (slide) { var wrap = doc.createElement('div'); wrap.innerHTML = renderSlide(slide); var node = wrap.firstElementChild; doc.body.insertBefore(node, marker); slides.push(node); });
+        list.forEach(function (slide) { var wrap = doc.createElement('div'); wrap.innerHTML = renderSlide(slide); var node = wrap.firstElementChild; fillFigures(node, figs); doc.body.insertBefore(node, marker); slides.push(node); });
       }
       try {
         insert(lesson.slides);
-        var divided = measureSlides(doc, lesson);
+        var divided = measureSlides(doc, lesson, figs);
         slides.forEach(function (s) { s.parentNode.removeChild(s); }); slides = [];
         insert(divided.slides);
       } catch (err) { log('장을 나누는 중: ' + err.message); }

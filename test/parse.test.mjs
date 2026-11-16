@@ -47,7 +47,9 @@ const all = readLesson('all-parts'), ion = readLesson('ion-3-1');
 
 // Use the actual engine expression parser to verify compatibility without DOM,
 // external packages, eval of lesson input, or launching Chrome.
-const engine = readFileSync(new URL('../../engine/exploragram.js', import.meta.url), 'utf8');
+// lite.js가 실제로 불러오는 엔진(resonance@2)으로 시험한다. ENGINE=경로 로 로컬 파일을 줄 수도 있다.
+const engine = process.env.ENGINE ? readFileSync(process.env.ENGINE, 'utf8')
+  : await (await fetch('https://cdn.jsdelivr.net/gh/N-lifescience/resonance@2/engine/exploragram.js')).text();
 const sandbox = {};
 const start = engine.indexOf('/* ---- 50-expr.js ---- */'), end = engine.indexOf('/* ---- 51-stepper.js ---- */');
 assert(start > 0 && end > start);
@@ -378,7 +380,7 @@ function browserHarness(options = {}) {
       return this.descendants().filter(n => selectors.some(sel => {
         const tag = sel.match(/^[a-z]+/i), id = sel.match(/#([\w-]+)/), cls = sel.match(/\.([\w-]+)/);
         const match = (!tag || n.tagName === tag[0].toUpperCase()) && (!id || n.id === id[1]) && (!cls || n.className.split(/\s+/).includes(cls[1]));
-        return match && [...sel.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)].every(a => (n.attrs[a[1]] ?? n[a[1]]) === a[2]);
+        return match && [...sel.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)].every(a => a[2] === undefined ? (n.attrs[a[1]] ?? n[a[1]]) != null : (n.attrs[a[1]] ?? n[a[1]]) === a[2]);
       }));
     }
     querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
@@ -401,11 +403,12 @@ function browserHarness(options = {}) {
   doc.createElement = tag => new Element(tag);
   doc.getElementById = id => doc.descendants().find(n => n.id === id) || null;
   Object.defineProperty(doc, 'scripts', { get() { return doc.descendants().filter(n => n.tagName === 'SCRIPT'); } });
-  doc.readyState = options.ready ? 'complete' : 'loading'; doc.title = options.title || '전하와 입자';
+  doc.readyState = options.ready ? 'complete' : 'loading'; doc.title = options.title ?? '전하와 입자';
   const liteScript = new Element('script', options.base ? { 'data-engine': options.base } : {});
   doc.currentScript = liteScript; doc.head.appendChild(liteScript);
   const source = new Element('script', options.plain ? { type: 'text/plain', id: 'lesson' } : { type: 'text/x-lesson' });
   source.textContent = options.text || '색: #123456\n# 첫째\n글'; doc.body.appendChild(source);
+  if (options.figures) { const bundle = new Element('script', options.figuresById ? { type: 'application/json', id: 'lite-figures' } : { type: 'text/x-figures' }); bundle.textContent = JSON.stringify(options.figures); doc.body.appendChild(bundle); }
   if (options.saved) {
     doc.body.appendChild(new Element('section', { class: 'slide', id: 'saved' }));
     doc.documentElement.setAttribute('data-deck', 'saved-deck');
@@ -414,6 +417,8 @@ function browserHarness(options = {}) {
   if (options.css) { const link = new Element('link'); link.rel = 'stylesheet'; link.href = '/already/exploragram.css'; link.sheet = {}; doc.head.appendChild(link); }
   trace.length = 0;
   const win = { console: { warn: msg => warnings.push(msg) }, setTimeout: (fn, ms) => { assert.equal(ms, 5000); timers.set(++timerId, fn); return timerId; }, clearTimeout: id => timers.delete(id) };
+  // 그림 묶음 시험용: 마주온 코드가 넣은 data URL을 400×300 그림으로 연다. 'bad'가 든 주소는 실패한다.
+  win.Image = class { set src(v) { this.naturalWidth = 400; this.naturalHeight = 300; Promise.resolve().then(() => (/bad/.test(v) ? this.onerror() : this.onload())); } };
   vm.runInNewContext(readFileSync(new URL('../lite.js', import.meta.url), 'utf8'), { window: win, document: doc });
   return { doc, win, source, trace, warnings, timers, ready: () => doc.events.DOMContentLoaded(), finishCSS: () => doc.querySelector('link[rel="stylesheet"]').events.load() };
 }
@@ -421,8 +426,8 @@ async function asyncTest(name, run) {
   try { await run(); passed++; console.log('ok ' + passed + ' - ' + name); }
   catch (error) { console.error('FAIL - ' + name); throw error; }
 }
-// 글꼴 기다리기(waitFonts) 단계가 들어가 마이크로태스크가 두 번 더 돈다.
-const flush = async () => { for (let i = 0; i < 4; i++) await Promise.resolve(); };
+// 글꼴 기다리기(waitFonts)와 그림 불러오기(loadFigures)를 함께 기다리느라 마이크로태스크가 여러 번 돈다.
+const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 await asyncTest('browser waits for DOM and CSS, preserves source and loads engine last', async () => {
   const h = browserHarness({ base: '../../engine/' });
   assert.equal(h.trace.length, 0, 'DOMContentLoaded has not fired');
@@ -460,6 +465,33 @@ await asyncTest('saved HTML runs engine only and existing engine scripts are not
     assert.equal(h.doc.scripts.filter(s => s.src).length, 1);
     assert(!h.doc.querySelector('link[rel="stylesheet"]')); assert(!h.doc.getElementById('lite-css')); assert.equal(h.timers.size, 0);
   }
+});
+await asyncTest('figure bundle from majuon fills picture slots and leaves the document', async () => {
+  const png = 'data:image/png;base64,iVBORw0KGgo=';
+  const h = browserHarness({ ready: true, css: true, title: '', text: '# [표지] 냄새는 어떻게 퍼질까?\n# 장\n[그림 3-1] 향수\n[그림 5-1] 잉크\n[그림 6-1] 없는 그림',
+    figures: { '3-1': png, '5-1': 'data:image/png;base64,bad', '6-9': png, 'x': png, '7-1': 'https://example.com/a.png', '8-1': 'UklGRgZIAABXRUJQ' } });
+  await flush();
+  assert(!h.doc.querySelector('script[type="text/x-figures"]'), 'bundle is removed so saving does not store pictures twice');
+  assert.equal(h.doc.title, '냄새는 어떻게 퍼질까?', 'cover title names the document when <title> is missing');
+  const deckOf = title => browserHarness({ ready: true, css: true, title }).doc.documentElement.getAttribute('data-deck');
+  assert.equal(h.doc.documentElement.getAttribute('data-deck'), deckOf('냄새는 어떻게 퍼질까?'));
+  assert.notEqual(h.doc.documentElement.getAttribute('data-deck'), deckOf('수업'));
+  const imgs = h.doc.querySelectorAll('img[data-ppt]');
+  const byId = Object.fromEntries(imgs.map(img => [img.getAttribute('data-ppt'), img]));
+  assert.equal(byId['3-1'].getAttribute('src'), png); assert.equal(byId['3-1'].style.aspectRatio, '400 / 300');
+  assert.equal(byId['5-1'].getAttribute('src'), null, 'broken picture keeps the PPT placeholder');
+  assert.equal(byId['6-1'].getAttribute('src'), null, 'unknown number keeps the PPT placeholder');
+  assert.equal(h.warnings.filter(w => /5-1/.test(w)).length, 1);
+  // 마주온 코드는 data: 머리 없이 WebP base64만 넣는다. 예전 꼴(id="lite-figures", data URL)도 읽는다.
+  const raw = browserHarness({ ready: true, css: true, text: '# 장\n[그림 8-1] 원\n[그림 7-1] 바깥 주소', figures: { '8-1': 'UklGRgZIAABXRUJQ', '7-1': 'https://example.com/a.png' } });
+  await flush();
+  const rawImgs = Object.fromEntries(raw.doc.querySelectorAll('img[data-ppt]').map(img => [img.getAttribute('data-ppt'), img]));
+  assert.equal(rawImgs['8-1'].getAttribute('src'), 'data:image/webp;base64,UklGRgZIAABXRUJQ');
+  assert.equal(rawImgs['7-1'].getAttribute('src'), null, 'outside picture addresses are never loaded');
+  const old = browserHarness({ ready: true, css: true, figuresById: true, text: '# 장\n[그림 3-1] 향수', figures: { '3-1': png } });
+  await flush();
+  assert.equal(old.doc.querySelectorAll('img[data-ppt]')[0].getAttribute('src'), png);
+  assert(!old.doc.getElementById('lite-figures'));
 });
 await asyncTest('ready document and loaded stylesheet skip waits; explicit deck wins', async () => {
   const h = browserHarness({ ready: true, css: true, engine: true, base: '/engine', text: '덱: explicit-deck\n# 장\n문단' }); await flush();

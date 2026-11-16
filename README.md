@@ -1,8 +1,9 @@
-# Resonance lite
+# 공명 라이트 (Resonance lite)
 
 수업 글을 공명 엔진 HTML로 바꾸는 단일 파일 렌더러다. 빌드와 외부 라이브러리가 필요 없으며, 브라우저 코드는 ES2017 범위에서 작성했다. 입력 문법은 [SPEC.md](SPEC.md), 엔진 부품 문법은 `skills/exploragram/references/components.md`를 따른다.
 
-- `lite.js`: 파서, 순수 렌더러, 틀 6개, CSS, 브라우저 초기화와 장 나누기.
+- `lite.js`: 파서, 순수 렌더러, 틀 6개, CSS, 브라우저 초기화와 장 나누기, 마주온 그림 묶음 넣기.
+- `majuon/rules.md`: 충남교육청 마주온 에이전트 「공명 라이트」 규칙 원본. `LITE_URL`을 아래 주소로 바꿔 붙여 넣는다.
 - `test/parse.test.mjs`: Node 기본 모듈만 쓰는 시험. 실제 엔진 식 파서로 계산도 확인한다.
 - `examples/all-parts.html`: 틀 6개와 퀴즈, 분류, 순서, 그림 두 칸 배치.
 - `examples/states.json`: 위 예제의 1~6장 조작 상태 12개. 퍼지기는 초기화한 상태와 움직이는 상태를 비교한다.
@@ -12,8 +13,8 @@
 ## API
 
 ```js
-const { parseLesson, renderLesson } = require('./lite/lite.js');
-// Node ESM: import { parseLesson, renderLesson } from './lite/lite.js';
+const { parseLesson, renderLesson } = require('./lite.js');
+// Node ESM: import { parseLesson, renderLesson } from './lite.js';
 const lesson = parseLesson('# 제목\n본문');
 const html = renderLesson('# 제목\n본문');
 ```
@@ -26,12 +27,27 @@ const html = renderLesson('# 제목\n본문');
 
 그래프의 가로 변수는 한 글자 영문이어야 한다. `x`, 함수명, 상수명뿐 아니라 계산 결과에 쓰는 `y`도 `a`로 바꾸어 충돌을 막는다. 원자번호 19·20은 2, 8, 8, 2 배치에 필요한 네 번째 껍질을 추가한다.
 
+## 마주온 에이전트에서 쓰기
+
+공명 저장소(N-lifescience/resonance)의 `lite-renderer` 브랜치 `lite/` 폴더를 2026-11-16에 이 저장소로 옮겼다. 에이전트 규칙은 버전 태그 주소를 쓴다.
+
+    https://cdn.jsdelivr.net/gh/N-lifescience/resonance-lite@1/lite.js
+
+lite.js를 고치면 `1.x.y` 태그를 올리고 `https://purge.jsdelivr.net/gh/N-lifescience/resonance-lite@1/lite.js`로 캐시를 비운다. 규칙과 에이전트는 건드리지 않아도 된다. 문법이 바뀌어 규칙도 바꿔야 할 때만 `2.0.0`으로 올리고 규칙 주소를 `@2`로 바꾼다.
+
+마주온의 기본 모델은 HTML을 짜지 않고 수업 글만 쓴다. 코드 실행 칸은 인터넷에 닿지 않고(2026-11-16 확인, Pillow는 있음) 만든 파일은 7일짜리 링크로 나온다. 그래서 규칙의 코드 두 개가 이렇게 나눠 일한다.
+
+1. 목록 코드: 올라온 PPT의 장마다 글과 그림 번호를 찍고, 내용 그림 후보(크기, 되풀이 횟수, 8KB 이하로 거름)를 1280px WebP로 줄여 `figs.json`에 담는다.
+2. 파일 만들기 코드: 수업 글과 `figs.json`을 `<script type="text/x-figures">`에 넣어 `수업.html`을 쓴다. 링크를 누르면 바로 열린다.
+
+lite.js는 그림 묶음을 읽어 `img[data-ppt]` 자리에 넣고(값은 WebP base64나 data URL), 묶음은 문서에서 떼어 내 엔진의 「그림 넣어 저장」이 쓴 그림만 담게 한다. 묶음에 없는 번호는 예전처럼 회색 자리로 남아 원본 PPT를 끌어다 놓으면 채워진다. `<title>`이 없으면 표지 제목을 문서 제목으로 삼아 수업마다 판서 저장 칸이 갈린다. `*.blob.core.windows.net`(마주온 파일 링크)에서 열면 링크가 사라지는 날짜와 저장 방법을 화면 위 띠로 알린다. 띠는 닫힌 그림자 루트에 그려 저장 파일에 따라가지 않는다.
+
 ## 시험
 
-저장소 루트에서 실행한다.
+저장소 루트에서 실행한다. 엔진 식 검사는 lite.js가 쓰는 `resonance@2` 엔진을 받아 쓰고, `ENGINE=경로`로 로컬 파일을 줄 수 있다.
 
 ```sh
-node lite/test/parse.test.mjs
+node test/parse.test.mjs
 ```
 
 문법, 이스케이프, 결정적 퀴즈 섞기, 틀의 식과 처음·끝 계산값, 장 나누기, 초기화 순서를 검사한다. 초기화 검사는 Node 모의 DOM으로 수행하며 실제 브라우저 배치 검사를 대신하지 않는다.
