@@ -4,6 +4,7 @@
 
 - `lite.js`: 파서, 순수 렌더러, 틀 6개, CSS, 브라우저 초기화와 장 나누기, 마주온 그림 묶음 넣기.
 - `majuon/rules.md`: 충남교육청 마주온 에이전트 「공명 라이트」 규칙 원본. `LITE_URL`을 아래 주소로 바꿔 붙여 넣는다.
+- `majuon/knowledge/example-*.md`: 에이전트 지식에 올리는 수업 글 본보기 4개(HTML 겉틀과 덱 줄 없이 수업 글만).
 - `test/parse.test.mjs`: Node 기본 모듈만 쓰는 시험. 실제 엔진 식 파서로 계산도 확인한다.
 - `examples/all-parts.html`: 틀 6개와 퀴즈, 분류, 순서, 그림 두 칸 배치.
 - `examples/states.json`: 위 예제의 1~6장 조작 상태 12개. 퍼지기는 초기화한 상태와 움직이는 상태를 비교한다.
