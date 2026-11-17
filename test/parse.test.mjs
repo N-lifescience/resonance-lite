@@ -304,6 +304,126 @@ test('stages have a starting stop, numbered data-only panels and optional pictur
   assert(html.includes('<div data-only="2"><p>흩어진다.</p></div>'));
   assert(html.includes('data-ai="모형"')); assert(html.includes('(모형)'));
 });
+test('spectrum accepts spaced, case-insensitive pigment aliases and discards explanations', () => {
+  for (const [names, expected] of [
+    [['엽록소 a', '엽록소a', '클로로필 A', '클 로 로 필 a'], 'ca'],
+    [['엽록소 b', '엽록소B', '클로로필 b'], 'cb'],
+    [['카로티노이드', '카로틴', '잔토필'], 'cc'],
+    [['광합성 속도', '광합성속도', '작용스펙트럼', '작용 스펙트럼'], 'cp']
+  ]) for (const name of names) {
+    const text = '# 파장\n[스펙트럼] 비교해 보자.\n- ' + name + ' | 버릴 설명';
+    const p = parseLesson(text), html = renderLesson(text);
+    assert.deepEqual(p.slides[0].blocks[0].series, [expected]); assert.deepEqual(p.warnings, []);
+    assert(!html.includes('버릴 설명')); verifyCalcs(html);
+    assert.equal(nodes(html).filter(n => n.tag === 'polyline').length, 1);
+    assert.equal(nodes(html).filter(n => n.tag === 'circle' && n.attrs.r === '9').length, 1);
+  }
+});
+test('spectrum warns at unknown item lines, deduplicates aliases and uses three defaults', () => {
+  const p = parseLesson('# 파장\n[스펙트럼]\n- 모르는 색소 | 설명\n- 잔토필\n- 카로틴');
+  assert.deepEqual(p.slides[0].blocks[0].series, ['cc']);
+  assert.equal(p.warnings.length, 1); assert.equal(p.warnings[0].line, 3); assert.match(p.warnings[0].message, /모르는 색소/);
+  for (const tail of ['', '\n- 모르는 색소 | 설명']) {
+    const text = '# 파장\n[스펙트럼]' + tail;
+    assert.deepEqual(parseLesson(text).slides[0].blocks[0].series, ['ca', 'cb', 'cp']);
+    const html = renderLesson(text); verifyCalcs(html);
+    assert(!html.includes('모르는 색소')); assert(!html.includes('카로티노이드'));
+  }
+});
+test('spectrum curves and moving values agree with the engine at every sampled wavelength', () => {
+  const html = renderLesson('# 파장\n[스펙트럼] 비교해 보자.\n- 엽록소 a\n- 엽록소 b\n- 카로티노이드\n- 광합성 속도');
+  const { list, calcs } = verifyCalcs(html), calc = calcs[0];
+  assert.equal(calcs.length, 1); assert.equal(calc.attrs['data-ai'], '모형'); assert(Object.hasOwn(calc.attrs, 'data-activity'));
+  assert(!html.includes('figure class="plot"')); assert(!html.includes('Math.'));
+  const slider = list.find(n => n.tag === 'input');
+  assert.deepEqual([slider.attrs.name, slider.attrs.min, slider.attrs.max, slider.attrs.step, slider.attrs.value, slider.attrs['aria-label']], ['w', '400', '700', '5', '450', '파장']);
+  assert.equal(calcScope(calc, list).w, 450); assert.equal(calcScope(calc, list, true).w, 700);
+  const at = w => calcScope(calc, list, false, { w });
+  assert(at(430).ca > 0.7); assert(at(662).ca > 0.7); assert(at(550).ca < 0.05);
+  for (const curve of list.filter(n => n.tag === 'polyline')) {
+    const points = curve.attrs.points.split(' ').map(p => p.split(',').map(Number));
+    assert.equal(points.length, 151); assert.equal(points[0][0], 60); assert.equal(points.at(-1)[0], 580);
+    for (const [i, [x, y]] of points.entries()) {
+      const w = 400 + i * 2, scope = at(w);
+      assert(Math.abs(x - (60 + (w - 400) * 520 / 300)) <= 0.006);
+      assert(Math.abs(y - (290 - 260 * scope[curve.attrs['data-series']])) <= 0.006);
+      assert(scope.cp >= 0 && scope.cp <= 1);
+    }
+  }
+  const b = list.find(n => n.tag === 'polyline' && n.attrs['data-series'] === 'cb');
+  assert.equal(b.attrs['stroke-dasharray'], '8 6'); assert.equal(b.attrs['stroke-width'], '4');
+  for (const expr of ['ca * 100', 'cb * 100', 'cc * 100', 'cp * 100']) assert(list.some(n => n.tag === 'output' && n.attrs['data-expr'] === expr && n.attrs['data-digits'] === '0' && n.attrs['data-unit'] === '%'));
+  for (const w of [400, 450, 700]) {
+    const scope = at(w), cursor = list.find(n => n.tag === 'line' && n.attrs['data-attr']);
+    for (const expr of cursor.attrs['data-attr'].split(';')) assert.equal(evaluate(expr.slice(expr.indexOf(':') + 1), scope), 60 + (w - 400) * 520 / 300);
+  }
+});
+test('spectrum color names and swatches follow every textbook boundary', () => {
+  const { list, calcs } = verifyCalcs(renderLesson('# 파장\n[스펙트럼]'));
+  for (const [w, name, color] of [
+    [400, '청자색', '#6D28D9'], [449, '청자색', '#6D28D9'], [450, '청색', '#2563EB'], [499, '청색', '#2563EB'],
+    [500, '초록색', '#16A34A'], [559, '초록색', '#16A34A'], [560, '황색', '#EAB308'], [599, '황색', '#EAB308'],
+    [600, '적황색', '#F97316'], [649, '적황색', '#F97316'], [650, '적색', '#DC2626'], [700, '적색', '#DC2626']
+  ]) {
+    const scope = calcScope(calcs[0], list, false, { w });
+    assert.equal(scope.nm, name); assert.equal(scope.col, color);
+  }
+  const ids = data(renderLesson('# 둘\n[스펙트럼]\n[스펙트럼]'), 'id');
+  assert.equal(new Set(ids).size, ids.length, 'gradient IDs remain unique across models');
+});
+test('structure maps every organelle part alias and preserves the written name', () => {
+  const common = [['외막', 'outer'], ['내막', 'inner'], ['막 사이 공간', 'space'], ['막사이 공간', 'space'], ['막간 공간', 'space']];
+  for (const [organelle, aliases] of [
+    ['엽록체', [...common, ['스트로마', 'stroma'], ['타이라코이드', 'thylakoid'], ['틸라코이드', 'thylakoid'], ['타이라코이드 막', 'thylakoid'], ['그라나', 'granum'], ['그라눔', 'granum'], ['타이라코이드 내부', 'lumen'], ['틸라코이드 내부', 'lumen'], ['루멘', 'lumen'], ['타이라코이드 안', 'lumen']]],
+    ['미토콘드리아', [...common, ['크리스타', 'crista'], ['기질', 'matrix'], ['미토콘드리아 기질', 'matrix'], ['매트릭스', 'matrix']]]
+  ]) for (const [name, key] of aliases) {
+    const text = '# 구조\n[구조] ' + organelle + ' | 살펴보자.\n- ' + name + ' | 하는 일';
+    const p = parseLesson(text), block = p.slides[0].blocks[0];
+    assert.deepEqual(p.warnings, []); assert.equal(block.parts[0].key, key); assert.equal(block.parts[0].name, name);
+    const html = renderLesson(text), { list, calcs } = verifyCalcs(html);
+    const scope = calcScope(calcs[0], list);
+    assert.equal(scope.pt, 1); assert(html.includes('<b>' + name + '</b> 하는 일'));
+    assert(list.some(n => n.tag === 'text' && n.attrs.style?.includes('font-size:22px')));
+    assert(data(html, 'data-attr').some(a => a.split(';').some(part => evaluate(part.slice(part.indexOf(':') + 1), scope) === '#F59E0B')), name + ' highlights a shape');
+  }
+});
+test('structure infers organelles from distinctive names and honors explicit headers', () => {
+  for (const [name, organelle] of [['스트로마', 'chloroplast'], ['틸라코이드', 'chloroplast'], ['그라나', 'chloroplast'], ['루멘', 'chloroplast'], ['크리스타', 'mitochondrion'], ['기질', 'mitochondrion'], ['매트릭스', 'mitochondrion']]) {
+    const text = '# 구조\n[구조] 각 부분을 살펴보자.\n- ' + name + ' | 설명';
+    const p = parseLesson(text), b = p.slides[0].blocks[0];
+    assert.equal(b.organelle, organelle); assert.equal(b.question, '각 부분을 살펴보자.'); assert.deepEqual(p.warnings, []);
+    verifyCalcs(renderLesson(text));
+  }
+  assert.equal(parseLesson('# 구조\n[구조] 마이토콘드리아\n- 외막 | 설명').slides[0].blocks[0].organelle, 'mitochondrion');
+  assert.equal(parseLesson('# [구조] 엽록체\n- 외막 | 설명').slides[0].blocks[0].organelle, 'chloroplast');
+  assert.equal(parseLesson('# 구조\n[구조] 엽록체 | 살펴보자.\n- 기질 | 설명').slides[0].blocks[0].organelle, 'chloroplast');
+});
+test('structure keeps unknown part buttons and descriptions, limits to six, and falls back honestly', () => {
+  const text = '# 구조\n[구조] 엽록체 | 살펴보자.\n- 없는 부분 | 없는 부분의 설명\n- 크리스타 | 다른 소기관의 부분\n- 외막 | 바깥';
+  const p = parseLesson(text), html = renderLesson(text);
+  assert.deepEqual(p.warnings.map(w => w.line), [3, 4]); assert(p.warnings.every(w => /강조할 부분/.test(w.message)));
+  assert(html.includes('>없는 부분</button>')); assert(html.includes('<b>없는 부분</b> 없는 부분의 설명'));
+  const { list, calcs } = verifyCalcs(html);
+  assert.equal(calcScope(calcs[0], list).pt, 1); assert.equal(calcScope(calcs[0], list, true).pt, 3);
+  const limited = '# 구조\n[구조] 엽록체\n' + Array.from({ length: 7 }, (_, i) => '- 외막 | 설명 ' + i).join('\n');
+  assert.equal(parseLesson(limited).slides[0].blocks[0].parts.length, 6);
+  assert.deepEqual(parseLesson(limited).warnings.map(w => w.line), [9]); verifyCalcs(renderLesson(limited));
+  for (const text of ['# 구조\n[구조] 이름을 살펴보자.\n- 외막 | 설명', '# 구조\n[구조] 엽록체']) {
+    const p = parseLesson(text), html = renderLesson(text);
+    assert.equal(p.warnings[0].line, 2); assert(!html.includes('lite-structure')); assert(html.includes('[구조]'));
+  }
+  const escaped = renderLesson('# 구조\n[구조] 엽록체 | <img onerror="oops">\n- 외막 | <script>oops</script>');
+  verifyCalcs(escaped); assert(!escaped.includes('<script>')); assert(!escaped.includes('<img'));
+});
+test('bio example contains both organelles and all four spectrum curves with engine-compatible states', () => {
+  const bio = readLesson('bio-parts');
+  assert.equal(bio.parsed.slides.length, 3); assert.deepEqual(bio.parsed.warnings, []);
+  const { list, calcs } = verifyCalcs(bio.html);
+  assert.equal(calcs.length, 3);
+  for (const calc of calcs) { assert.equal(calc.attrs['data-ai'], '모형'); assert(Object.hasOwn(calc.attrs, 'data-activity')); }
+  assert.equal(list.filter(n => n.tag === 'polyline').length, 4);
+  assert.equal(paginateLesson(bio.parsed).slides.length, 3);
+});
 test('pagination preserves order, atomic activities, IDs and section metadata', () => {
   const text = '# [장표지] 2. 장\n# 긴 글\n' + Array.from({ length: 22 }, (_, i) => '문단 ' + i).join('\n') + '\n[퀴즈] 물음\n* 맞음\n- 틀림';
   const p = parseLesson(text);
@@ -612,4 +732,84 @@ test('weak-model dialect: non-template title tags are dropped; pictures never sp
   assert.deepEqual(titled.slides.map(s => s.title), ['정리', '단원 정리 그림', '다음 장']);
   assert.deepEqual(titled.slides[1].blocks.map(b => b.ppt), ['23-1', '23-3']);
 });
+// ---- PPT 원문 '@쪽' 펼치기(x-ppt) ----
+const liteApi = require('../lite.js');
+function pptSp(id, x, y, paras, opts = {}) {
+  const ph = opts.ph ? `<p:nvPr><p:ph type="${opts.ph}"/></p:nvPr>` : '<p:nvPr/>';
+  const body = paras.map(p => {
+    const runs = (Array.isArray(p) ? p : [p]).map(r => typeof r === 'string'
+      ? `<a:r><a:rPr lang="ko-KR" sz="${opts.sz || 3200}"/><a:t>${r}</a:t></a:r>`
+      : `<a:r><a:rPr lang="ko-KR" sz="${opts.sz || 3200}"><a:solidFill><a:srgbClr val="${r.c}"/></a:solidFill></a:rPr><a:t>${r.t}</a:t></a:r>`).join('');
+    return `<a:p>${runs}</a:p>`;
+  }).join('');
+  return `<p:sp><p:nvSpPr><p:cNvPr id="${id}" name="t${id}"/><p:cNvSpPr/>${ph}</p:nvSpPr><p:spPr><a:xfrm><a:off x="${x * 9525}" y="${y * 9525}"/><a:ext cx="${600 * 9525}" cy="${80 * 9525}"/></a:xfrm>${opts.fill ? `<a:solidFill><a:srgbClr val="${opts.fill}"/></a:solidFill>` : ''}</p:spPr><p:txBody><a:bodyPr/>${body}</p:txBody></p:sp>`;
+}
+function pptPic(id, y) {
+  return `<p:pic><p:nvPicPr><p:cNvPr id="${id}" name="그림 ${id}" descr="그래픽, 폰트이(가) 표시된"/></p:nvPicPr><p:blipFill><a:blip r:embed="rId${id}"/></p:blipFill><p:spPr><a:xfrm><a:off x="${700 * 9525}" y="${y * 9525}"/><a:ext cx="${400 * 9525}" cy="${300 * 9525}"/></a:xfrm></p:spPr></p:pic>`;
+}
+function pptTable(rows) {
+  return `<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="90" name="표"/></p:nvGraphicFramePr><p:xfrm><a:off x="${60 * 9525}" y="${500 * 9525}"/><a:ext cx="1" cy="1"/></p:xfrm><a:graphic><a:graphicData><a:tbl>${rows.map(r => `<a:tr h="1">${r.map(c => `<a:tc><a:txBody><a:p><a:r><a:t>${c}</a:t></a:r></a:p></a:txBody></a:tc>`).join('')}</a:tr>`).join('')}</a:tbl></a:graphicData></a:graphic></p:graphicFrame>`;
+}
+const chrome = (n) => pptSp(80 + n, 975, 70, ['세포와 물질대사'], { sz: 1500 }) + pptSp(70 + n, 1125, 70, ['10' + n + ' 쪽'], { sz: 1500 });
+const pptSlide = (inner, anim = []) => `<p:sld><p:cSld><p:spTree>${inner}</p:spTree></p:cSld>${anim.length ? `<p:timing>${anim.map(id => `<p:spTgt spid="${id}"/>`).join('')}</p:timing>` : ''}</p:sld>`;
+const deck = {
+  l: ['cover', 'body', 'cover', 'body', 'body'],
+  s: [
+    pptSlide(pptSp(2, 856, 200, ['세포호흡과 광합성'], { sz: 4000 }) + chrome(1)),
+    pptSlide(pptSp(3, 260, 60, ['엽록체의 구조'], { sz: 3000 }) + chrome(2)
+      + pptSp(4, 50, 300, ['(1) 엽록체는 외막과', '내막으로 싸여 있다.', '(2) 스트로마', '① 효소가 있는 공간'], { fill: '0166B3' }) + pptPic(5, 300), [4]),
+    pptSlide(pptSp(6, 775, 170, ['02'], { sz: 2400 }) + pptSp(7, 183, 320, ['빛과 색소'], { sz: 4000 }) + chrome(3)),
+    pptSlide(pptSp(8, 287, 54, ['흡수스펙트럼'], { sz: 3000 }) + chrome(4)
+      + pptSp(9, 97, 230, [[{ t: '● ', c: 'A3C854' }, '엽록소 a는 어떤 빛을 흡수하는가?']])
+      + pptSp(10, 161, 397, [[{ t: '청자색과 적색의 빛을 주로 흡수한다.', c: '00AFDD' }]])),
+    pptSlide(pptSp(11, 51, 291, ['광합성색소는 가시광선을 흡수한다.']) + pptTable([['색소', '색'], ['엽록소', '초록색']]) + chrome(5)),
+  ],
+};
+
+test('PPT 원문: @쪽이 없으면 수업 글을 그대로 둔다', () => {
+  const r = liteApi.expandAnchors('# [표지] 제목\n# 장\n- 글', deck, []);
+  assert.equal(r.used, false);
+});
+
+test('PPT 원문: @쪽은 그 쪽까지 PPT 장을 원문 그대로 펼치고, 남은 쪽은 끝에 붙인다', () => {
+  const r = liteApi.expandAnchors('# [표지] 엽록체\n세포와 물질대사\n@2 {외막}\n# 내가 쓴 장\n- 내 문장', deck, ['2-1']);
+  assert.equal(r.used, true);
+  const t = r.text;
+  assert.match(t, /\[바탕\] cover\n# \[표지\] 엽록체/);
+  assert.match(t, /\[바탕\] body\n# 엽록체의 구조\n- \(1\) 엽록체는 \{외막\}과 내막으로 싸여 있다\.\n- \(2\) 스트로마\n- ① 효소가 있는 공간\n\[그림 2-1\]/);
+  assert.doesNotMatch(t, /세포호흡과 광합성/, '표지를 직접 쓰면 PPT 1쪽은 넣지 않는다');
+  assert.doesNotMatch(t, /10\d 쪽|세포와 물질대사\n- /, '쪽 번호와 되풀이 머리글은 뺀다');
+  // 내가 쓴 장 뒤에 3~5쪽이 차례로
+  const mine = t.indexOf('# 내가 쓴 장'), ch = t.indexOf('# [장표지] 빛과 색소');
+  assert.ok(mine > 0 && ch > mine);
+  assert.match(t, /# \[장표지\] 빛과 색소\n02/);
+  assert.match(t, /Q\. 엽록소 a는 어떤 빛을 흡수하는가\?\n답: 청자색과 적색의 빛을 주로 흡수한다\./);
+  assert.match(t, /\| 색소 \| 색 \|\n\| 엽록소 \| 초록색 \|/);
+  assert.match(t, /# 흡수스펙트럼\n[\s\S]*# 흡수스펙트럼/, '제목이 없는 쪽은 앞 쪽 제목을 잇는다');
+});
+
+test('PPT 원문: 제목 바로잡기, 장표지 꼬리표, 배경, 자동 그림 설명', () => {
+  const r = liteApi.expandAnchors('# [표지] 엽록체\n@3 제목: 빛과 광합성색소\n@5', deck, ['2-1']);
+  const lesson = parseLesson(r.text);
+  const chapter = lesson.slides.find(s => s.type === 'chapter');
+  assert.equal(chapter.title, '빛과 광합성색소');
+  assert.equal(chapter.bg, 'cover');
+  const html = renderLesson(r.text);
+  assert.match(html, /<section class="slide chapter"[^>]*data-bg="cover"[^>]*><p class="kicker">02<\/p><h1>빛과 광합성색소<\/h1>/);
+  assert.match(html, /data-bg="body"/);
+  assert.match(html, /<figcaption data-auto>그림 2-1<\/figcaption>/);
+  assert.equal(lesson.slides.filter(s => s.type === 'normal').length, 3);
+});
+
+test('PPT 원문: 장표지가 아닌 쪽의 [ 로 시작하는 제목은 그대로 남는다', () => {
+  const d = { l: ['a', 'b'], s: [deck.s[0], pptSlide(pptSp(3, 260, 30, ['[논증형] 흙 없이 키운 채소'], { sz: 3200 }))] };
+  const lesson = parseLesson(liteApi.expandAnchors('@2', d, []).text);
+  assert.ok(lesson.slides.some(s => s.title.replace('​', '') === '[논증형] 흙 없이 키운 채소'));
+});
+
+test('PPT 원문: 강조색은 흰 글자와 대비가 넉넉한 PPT 색', () => {
+  assert.equal(liteApi.pptAccent(deck), '#0166B3');
+  assert.equal(liteApi.pptAccent({ s: ['<a:srgbClr val="FFFFFF"/>'] }), '');
+});
+
 console.log('\n' + passed + ' total tests passed. Chrome and browser layout/audit not run.');
