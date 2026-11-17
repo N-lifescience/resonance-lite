@@ -6,6 +6,7 @@
   var GRID = 'display:grid;grid-template-columns:600px 1fr;gap:28px;align-items:start';
   var RESERVED = ('abs min max round floor ceil sqrt pow exp ln log sin cos tan asin acos atan rad deg clamp if fix len sign pi e true false x constructor prototype __proto__').split(' ');
   var TEMPLATES = { '끌려가기': 'drift', '고르기': 'choice', '전자 이동': 'electron', '그래프': 'graph', '퍼지기': 'diffusion', '단계': 'stages', '스펙트럼': 'spectrum', '구조': 'structure', '퀴즈': 'quiz', '분류': 'sort', '순서': 'order' };
+  var TEMPLATE_TYPES = Object.keys(TEMPLATES).map(function (k) { return TEMPLATES[k]; });
   var COLORS = { '파랑': '#2563EB', '빨강': '#DC2626', '주황': '#B45309', '초록': '#15803D', '보라': '#7C3AED', '회색': '#6B7280' };
   var LITE_CSS = [
     '.slide{word-break:keep-all;overflow-wrap:anywhere}',
@@ -17,6 +18,11 @@
     'body[data-theme="ppt"] section.slide[data-bg]::before{display:none}',
     'body[data-theme="ppt"] section.slide[data-bg]:not(.cover):not(.chapter){padding-top:160px}',
     'body[data-theme="ppt"] section.slide[data-bg] .lite-figure-only .fig,body[data-theme="ppt"] section.slide[data-bg] .lite-figure-only .fig img{max-height:350px}',
+    // 배경 장은 위 여백이 160px라 스펙트럼 오른쪽 칸(물음, 슬라이더, 막대 4개)이 넘친다. 간격만 줄인다.
+    'body[data-theme="ppt"] section.slide[data-bg] .lite-spectrum p{margin-bottom:2px}',
+    'body[data-theme="ppt"] section.slide[data-bg] .lite-spectrum .q{margin-bottom:6px}',
+    'body[data-theme="ppt"] section.slide[data-bg] .lite-spectrum .bar{margin:0 0 6px}',
+    'body[data-theme="ppt"] section.slide[data-bg] .lite-spectrum .lite-model-note{margin-top:4px}',
     'body[data-theme="ppt"] section.slide.cover[data-bg] .band{background:transparent}',
     'body[data-theme="ppt"] section.slide.chapter[data-bg],body[data-theme="ppt"] section.slide.chapter[data-bg] p{color:#1F2328}',
     '.lite-pictures .fig,.lite-figure-only .fig{width:100%}',
@@ -366,6 +372,9 @@
     var hasCover = src.some(function (l) { return /^\s*[#＃]\s*\[표지\]/.test(l); });
     if (hasCover) placed = 1;
     var coverLayout = conv.length ? conv[0].layout : '';
+    // 내가 쓴 장(모형, 활동)은 앞의 '본문 있는' PPT 장 배경을 쓴다. 제목만 있는 장(다음 차시 안내 따위)과 표지 틀은 피한다.
+    var contentBg = '', fresh = false;
+    function bgLine(layout) { return '[바탕] ' + String(layout || '').replace(/\.xml$/, ''); }
     function upto(n, opts) {
       n = Math.min(n, total);
       while (placed < n) {
@@ -373,13 +382,21 @@
         var c = conv[placed - 1];
         if (c.cover) { if (!hasCover) out.push(coverText(c)); }
         else out.push(slideText(c, placed === n ? opts : null, state));
+        if (!c.cover && !c.chapter && c.lines.length) contentBg = c.layout || '';
+        fresh = true;
         out.push('');
       }
     }
     src.forEach(function (line) {
       var m = ANCHOR.exec(line);
       if (!m) {
-        if (/^\s*[#＃]\s*\[표지\]/.test(line) && coverLayout) out.push('[바탕] ' + coverLayout.replace(/\.xml$/, ''));
+        var head = /^\s*\[([^\]]+)\]/.exec(line);
+        if (/^\s*[#＃]\s*\[표지\]/.test(line)) { if (coverLayout) out.push(bgLine(coverLayout)); }
+        else if (/^\s*[#＃]\s*\[장표지\]/.test(line)) out.push(bgLine(coverLayout));
+        else if (/^\s*[#＃]/.test(line)) out.push(bgLine(contentBg));
+        // 약한 모델은 '@23' 바로 뒤에 '# 제목' 없이 활동을 쓴다. 그대로 두면 PPT 장에 붙으니 장을 새로 연다.
+        else if (fresh && head && Object.prototype.hasOwnProperty.call(TEMPLATES, head[1].trim())) { out.push(bgLine(contentBg)); line = '# ' + line.trim(); }
+        if (line.trim()) fresh = false;
         out.push(line); return;
       }
       var n = Number(m[2] || m[1]), rest = m[3] || '', opts = { blanks: [] };
@@ -496,6 +513,12 @@
         if (!current.blocks.length) current.blocks.push({ type: 'kicker', text: unbullet(line), line: i + 1 });
         continue;
       }
+      // 한 장에 모형·활동이 이미 있는데 또 오면('# 제목' 없이 활동을 잇달아 쓴 글) 장을 새로 연다.
+      if ((m = /^\[([^\]]+)\]\s*(.*)$/.exec(line)) && Object.prototype.hasOwnProperty.call(TEMPLATES, m[1]) && current && current.blocks.some(function (b) { return TEMPLATE_TYPES.indexOf(b.type) >= 0; })) {
+        lines[i] = '# ' + line;
+        i--;
+        continue;
+      }
       if ((m = /^\[([^\]]+)\]\s*(.*)$/.exec(line)) && Object.prototype.hasOwnProperty.call(TEMPLATES, m[1])) {
         var block = { type: TEMPLATES[m[1]], text: m[2], source: line, lines: [], line: i + 1 };
         // 물음이 장 제목과 같으면 활동 안에서 물음 줄을 다시 그리지 않는다.
@@ -509,9 +532,26 @@
             lesson.warnings.push({ line: i + 1, message: '활동 문법을 알 수 없어 문단으로 표시한다: ' + lines[i] });
           }
         }
+        // 약한 모델은 [분류]를 '- 낱말 | 설명' 표로 쓴다('= 칸'이 없다). 2~4줄이면 설명 칸에 낱말을 넣는 짝짓기로, 더 많으면 표로 살린다.
+        var pairs = block.type === 'sort' && !block.lines.length && unknown.length >= 2 ? unknown.map(function (u) { return /^[-*•·]\s*([^|=]+?)\s*\|\s*(.+)$/.exec(u.text); }) : [];
+        if (pairs.length && pairs.every(Boolean)) {
+          lesson.warnings = lesson.warnings.filter(function (w) { return !unknown.some(function (u) { return u.line === w.line; }); });
+          var head = pipes(block.text).filter(Boolean);
+          var descs = pairs.map(function (p) { return p[2].replace(/\|/g, '/').trim(); });
+          if (pairs.length <= 4) {
+            block.text = descs.join(' | ');
+            block.lines = pairs.map(function (p, k) { return { text: '- ' + p[1].trim() + ' = ' + descs[k], line: unknown[k].line }; });
+            if (current && current.title === '나누어 보자') current.title = '알맞게 짝지어 보자';
+            unknown = [];
+          } else {
+            unknown = [{ type: 'table', rows: (head.length === 2 ? [head] : []).concat(pairs.map(function (p, k) { return [p[1].trim(), descs[k]]; })), line: block.line }];
+            block.lines = [];
+          }
+        }
         // 보기·카드·항목이 2개 안 되는 퀴즈·분류·순서는 엔진이 오류로 알리므로 버린다.
         var listed = block.lines.filter(function (l) { return /^[-*•·]/.test(l.text); }).length;
-        if ((['quiz', 'order'].indexOf(block.type) >= 0 && listed < 2) || (block.type === 'sort' && listed < 1)) lesson.warnings.push({ line: block.line, message: '보기·카드·항목이 2개보다 적어 활동을 뺐다: ' + block.source });
+        if (unknown.length && unknown[0].type === 'table' && !listed) lesson.warnings.push({ line: block.line, message: '[분류]에 \'= 칸\'이 없고 줄이 많아 표로 보였다: ' + block.source });
+        else if ((['quiz', 'order'].indexOf(block.type) >= 0 && listed < 2) || (block.type === 'sort' && listed < 1)) lesson.warnings.push({ line: block.line, message: '보기·카드·항목이 2개보다 적어 활동을 뺐다: ' + block.source });
         else {
           if (block.type === 'spectrum') prepareSpectrum(block, lesson.warnings);
           if (block.type === 'structure') prepareStructure(block, lesson.warnings);

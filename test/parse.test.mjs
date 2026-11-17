@@ -161,8 +161,9 @@ test('unknown lines remain paragraphs, including unknown activity lines', () => 
 });
 test('activity blocks end at blanks, headings and the next marker without blanks', () => {
   const p = parseLesson('# 첫째\n[퀴즈] 물음\n* 정답\n- 오답\n[분류] 가|나\n- 카드 = 가\n[순서] 순서\n- 먼저\n- 나중\n# 둘째\n[단계] 과정\n- 처음|문장\n\n보통 문장');
-  assert.deepEqual(p.slides[0].blocks.map(b => b.type), ['quiz', 'sort', 'order']);
-  assert.deepEqual(p.slides[1].blocks.map(b => b.type), ['stages', 'paragraph']);
+  // 한 장에 활동이 또 오면 장을 새로 연다(2.0.1)
+  assert.deepEqual(p.slides.map(s => s.blocks.map(b => b.type).join('+')), ['quiz', 'sort', 'order', 'stages+paragraph']);
+  assert.deepEqual(p.slides.map(s => s.title), ['첫째', '나누어 보자', '순서', '둘째']);
 });
 test('tables use a header row, row headings, and discard separators', () => {
   const html = renderLesson('# 표\n|이온|전하|\n|---|:---:|\n|Na⁺|+1|\n|Cl⁻|−1|');
@@ -805,6 +806,34 @@ test('PPT 원문: 장표지가 아닌 쪽의 [ 로 시작하는 제목은 그대
   const d = { l: ['a', 'b'], s: [deck.s[0], pptSlide(pptSp(3, 260, 30, ['[논증형] 흙 없이 키운 채소'], { sz: 3200 }))] };
   const lesson = parseLesson(liteApi.expandAnchors('@2', d, []).text);
   assert.ok(lesson.slides.some(s => s.title.replace('​', '') === '[논증형] 흙 없이 키운 채소'));
+});
+
+test('PPT 원문: @쪽 바로 뒤에 # 없이 쓴 활동은 새 장, 내가 쓴 장은 본문 있는 쪽의 배경', () => {
+  // 3쪽은 장표지(표지와 같은 틀), 6쪽은 제목만 있는 쪽(다음 차시 안내)
+  const d = { l: deck.l.concat(['ending']), s: deck.s.concat([pptSlide(pptSp(12, 200, 300, ['광합성 과정'], { sz: 4000 }))]) };
+  const r = liteApi.expandAnchors('# [표지] 엽록체\n@2\n# 엽록체를 살펴보자\n[퀴즈] 바깥 막은?\n* 외막\n- 내막\n@6\n[퀴즈] 쌓인 구조는?\n* 그라나 | 맞다.\n- 스트로마 | 아니다.\n\n[분류] 색소 | 하는 일\n- 엽록소 | 빛을 흡수하는 중심 색소이다.\n- 카로티노이드 | 빛을 흡수해 엽록소로 전달한다.', d, []);
+  const lesson = parseLesson(r.text);
+  const titles = lesson.slides.map(s => s.title + '/' + s.bg);
+  assert.ok(titles.includes('엽록체를 살펴보자/body'), titles.join(' | '));
+  assert.ok(titles.includes('광합성 과정/ending'));
+  const quiz = lesson.slides.find(s => s.title === '쌓인 구조는?');
+  assert.ok(quiz, '활동이 PPT 마지막 쪽에 붙지 않고 제 장을 연다');
+  assert.equal(quiz.bg, 'body', '제목만 있는 쪽의 배경은 물려받지 않는다');
+  const sort = lesson.slides.find(s => s.blocks.some(b => b.type === 'sort'));
+  assert.equal(sort.title, '알맞게 짝지어 보자');
+  assert.equal(sort.bg, 'body');
+  const block = sort.blocks.find(b => b.type === 'sort');
+  assert.equal(block.text, '빛을 흡수하는 중심 색소이다. | 빛을 흡수해 엽록소로 전달한다.');
+  assert.deepEqual(block.lines.map(l => l.text), ['- 엽록소 = 빛을 흡수하는 중심 색소이다.', '- 카로티노이드 = 빛을 흡수해 엽록소로 전달한다.']);
+  assert.ok(!lesson.warnings.some(w => /활동 문법/.test(w.message)), JSON.stringify(lesson.warnings));
+});
+
+test('[분류]를 낱말 | 설명 표로 5줄 넘게 쓰면 표로 살린다', () => {
+  const lesson = parseLesson('# 색소\n[분류] 색소 | 색\n- 엽록소 a | 청록색\n- 엽록소 b | 황록색\n- 카로틴 | 주황색\n- 잔토필 | 노란색\n- 안토시아닌 | 붉은색');
+  const blocks = lesson.slides[0].blocks;
+  assert.deepEqual(blocks.map(b => b.type), ['table']);
+  assert.deepEqual(blocks[0].rows[0], ['색소', '색']);
+  assert.equal(blocks[0].rows.length, 6);
 });
 
 test('PPT 원문: 강조색은 흰 글자와 대비가 넉넉한 PPT 색', () => {
