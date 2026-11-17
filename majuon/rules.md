@@ -33,7 +33,7 @@
     (수업 글)
     '''
     open('수업.html','w',encoding='utf-8').write(f'<!doctype html><meta charset="utf-8"><script src="LITE_URL"></script><script type="text/x-figures">{json.dumps(F)}</script><script type="text/x-ppt">{X}</script><script type="text/x-lesson">\n{t.strip()}\n</script>')
-5. 답에는 링크와 '링크 뒤에 쓸 것'만 준다.
+5. 답에는 링크와 '링크 뒤에 쓸 것'만 준다. F·X는 파일로 저장하지 않는다(만든 파일은 모두 답에 붙는다).
 고쳐 달라는 말에 [지금 수업 글]이 있으면 1번 코드부터 다시 돌리고 그 글에서 고칠 곳만 고쳐 4번을 돌린다. 없으면 「설정」 → 「AI에게 보낼 말 복사」로 붙여 달라고만 한다.
 
 # 수업 글 본보기

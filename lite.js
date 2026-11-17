@@ -374,6 +374,7 @@
     var coverLayout = conv.length ? conv[0].layout : '';
     // 내가 쓴 장(모형, 활동)은 앞의 '본문 있는' PPT 장 배경을 쓴다. 제목만 있는 장(다음 차시 안내 따위)과 표지 틀은 피한다.
     var contentBg = '', fresh = false;
+    var layoutUse = {}; conv.forEach(function (c) { layoutUse[c.layout] = (layoutUse[c.layout] || 0) + 1; });
     function bgLine(layout) { return '[바탕] ' + String(layout || '').replace(/\.xml$/, ''); }
     function upto(n, opts) {
       n = Math.min(n, total);
@@ -382,7 +383,7 @@
         var c = conv[placed - 1];
         if (c.cover) { if (!hasCover) out.push(coverText(c)); }
         else out.push(slideText(c, placed === n ? opts : null, state));
-        if (!c.cover && !c.chapter && c.lines.length) contentBg = c.layout || '';
+        if (!c.cover && !c.chapter && c.lines.length && (layoutUse[c.layout] || 0) >= 3) contentBg = c.layout || '';
         fresh = true;
         out.push('');
       }
