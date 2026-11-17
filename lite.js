@@ -1280,7 +1280,12 @@
       current.blocks = (figureChunks[0] || []).slice();
       blocks.filter(function (b) { return !isFigure(b); }).forEach(function (block) {
         var candidate = Object.assign({}, current, { blocks: current.blocks.concat([block]) });
-        if (hasText && heightOf(candidate) > budget) nextPage([block]);
+        var last = current.blocks[current.blocks.length - 1];
+        // 답만 다음 쪽으로 넘어가면 체크 표시만 있는 빈 장이 된다. 물음이 앞에 있으면 함께 넘긴다.
+        if (hasText && heightOf(candidate) > budget && block.type === 'answer' && last && last.type === 'question' && current.blocks.filter(function (b) { return !isFigure(b); }).length > 1) {
+          current = Object.assign({}, current, { blocks: current.blocks.slice(0, -1) });
+          nextPage([last, block]);
+        } else if (hasText && heightOf(candidate) > budget) nextPage([block]);
         else current = candidate;
         hasText = true;
       });
